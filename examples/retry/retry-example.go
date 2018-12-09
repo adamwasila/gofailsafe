@@ -35,18 +35,26 @@ func main() {
 	logrus.SetLevel(logrus.DebugLevel)
 
 	logrus.Info("#1")
-	r := f.NewRetry()
+	r, err := f.NewRetry()
 	r.Run(alwaysWithErrorJob)
 
 	logrus.Info("#2")
-	r = f.NewRetry(f.WithDelay(100*time.Millisecond), f.WithRetries(15))
+	r, err = f.NewRetry(f.WithDelay(100*time.Millisecond), f.WithRetries(15))
 	r.Run(alwaysWithErrorJob)
 
 	logrus.Info("#3")
-	r = f.NewRetry(f.RetryIf(shouldRetry()))
+	r, err = f.NewRetry(f.RetryIf(shouldRetry()))
 	r.Run(sucessfulJob)
 
 	logrus.Info("#4")
-	r = f.NewRetry(f.RetryOnPanic())
+	r, err = f.NewRetry(f.RetryOnPanic())
 	r.Run(panickingJob)
+
+	logrus.Info("#5")
+	r, err = f.NewRetry(f.WithDelay(-1 * time.Second))
+	logrus.WithField("error", err).Info("Expected non-nil error here")
+
+	logrus.Info("#6")
+	r, err = f.NewRetry(f.WithRetries(-3))
+	logrus.WithField("error", err).Info("Expected non-nil error here")
 }

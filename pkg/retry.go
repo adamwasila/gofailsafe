@@ -12,9 +12,9 @@ type Retry struct {
 	recover   bool
 }
 
-type retryOption func(*Retry)
+type retryOption func(*Retry) error
 
-func NewRetry(options ...retryOption) *Retry {
+func NewRetry(options ...retryOption) (*Retry, error) {
 	r := &Retry{
 		delay:   0 * time.Second,
 		retries: -1,
@@ -24,32 +24,45 @@ func NewRetry(options ...retryOption) *Retry {
 		recover: false,
 	}
 	for _, o := range options {
-		o(r)
+		err := o(r)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return r
+	return r, nil
 }
 
 func WithDelay(delay time.Duration) retryOption {
-	return func(r *Retry) {
+	return func(r *Retry) error {
 		r.delay = delay
+		if delay < 0 {
+			return fmt.Errorf("Delay should be >= 0 (is: %v)", delay)
+		}
+		return nil
 	}
 }
 
 func WithRetries(retries int) retryOption {
-	return func(r *Retry) {
+	return func(r *Retry) error {
 		r.retries = retries
+		if retries < 0 {
+			return fmt.Errorf("Number of retries should be >=0 (is: %v)", retries)
+		}
+		return nil
 	}
 }
 
 func RetryIf(predicate func(result interface{}, err error) bool) retryOption {
-	return func(r *Retry) {
+	return func(r *Retry) error {
 		r.predicate = predicate
+		return nil
 	}
 }
 
 func RetryOnPanic() retryOption {
-	return func(r *Retry) {
+	return func(r *Retry) error {
 		r.recover = true
+		return nil
 	}
 }
 
