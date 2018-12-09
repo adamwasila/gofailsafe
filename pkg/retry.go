@@ -16,8 +16,8 @@ type retryOption func(*Retry)
 
 func NewRetry(options ...retryOption) *Retry {
 	r := &Retry{
-		delay:   1 * time.Second,
-		retries: 3,
+		delay:   0 * time.Second,
+		retries: -1,
 		predicate: func(result interface{}, err error) bool {
 			return err != nil
 		},
