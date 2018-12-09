@@ -66,11 +66,7 @@ func RetryOnPanic() retryOption {
 	}
 }
 
-type Job func() error
-
-type ResultJob func() (interface{}, error)
-
-func recoverDecorator(job Job) func() (err error) {
+func recoverDecorator(job func() error) func() (err error) {
 	return func() (err error) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -81,7 +77,7 @@ func recoverDecorator(job Job) func() (err error) {
 	}
 }
 
-func (r *Retry) Run(job Job) {
+func (r *Retry) Run(job func() error) {
 	if r.recover {
 		job = recoverDecorator(job)
 	}
@@ -95,7 +91,7 @@ func (r *Retry) Run(job Job) {
 	}
 }
 
-func (r *Retry) Get(job ResultJob) {
+func (r *Retry) Get(job func() (interface{}, error)) {
 	i := 1
 	for {
 		if res, err := job(); !r.predicate(res, err) || i >= r.retries {
