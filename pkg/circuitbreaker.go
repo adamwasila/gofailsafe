@@ -47,10 +47,6 @@ func NewCircuitBreaker(options ...circuitBreakerOption) (*CircuitBreaker, error)
 }
 
 func (cb *CircuitBreaker) State() string {
-	if cb.state == stateOpen && time.Since(cb.stateChangeTimestamp) > cb.openDelay {
-		cb.state = stateHalfOpen
-		cb.stateChangeTimestamp = time.Now()
-	}
 	switch cb.state {
 	case stateClosed:
 		return "CLOSED"
@@ -104,7 +100,7 @@ func (cb *CircuitBreaker) Run(job func() error) error {
 	if cb.recover {
 		job = recoverDecorator(job)
 	}
-	cb.State()
+	cb.updateState()
 	switch cb.state {
 	case stateClosed:
 		err := job()
@@ -138,5 +134,12 @@ func (cb *CircuitBreaker) Run(job func() error) error {
 		return fmt.Errorf("Error: circuit breaker is open")
 	default:
 		panic("Must never happen")
+	}
+}
+
+func (cb *CircuitBreaker) updateState() {
+	if cb.state == stateOpen && time.Since(cb.stateChangeTimestamp) > cb.openDelay {
+		cb.state = stateHalfOpen
+		cb.stateChangeTimestamp = time.Now()
 	}
 }
