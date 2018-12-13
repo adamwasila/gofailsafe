@@ -63,7 +63,7 @@ func (cb *CircuitBreaker) State() string {
 	}
 }
 
-func WithFailureThreshold(failureThreshold int) circuitBreakerOption {
+func FailureThreshold(failureThreshold int) circuitBreakerOption {
 	return func(cb *CircuitBreaker) error {
 		cb.failureThreshold = failureThreshold
 		if failureThreshold < 1 {
@@ -73,7 +73,7 @@ func WithFailureThreshold(failureThreshold int) circuitBreakerOption {
 	}
 }
 
-func WithSuccessThreshold(successThreshold int) circuitBreakerOption {
+func SuccessThreshold(successThreshold int) circuitBreakerOption {
 	return func(cb *CircuitBreaker) error {
 		cb.successThreshold = successThreshold
 		if successThreshold < 1 {
@@ -83,7 +83,7 @@ func WithSuccessThreshold(successThreshold int) circuitBreakerOption {
 	}
 }
 
-func WithOpenDelay(openDelay time.Duration) circuitBreakerOption {
+func OpenDelay(openDelay time.Duration) circuitBreakerOption {
 	return func(cb *CircuitBreaker) error {
 		cb.openDelay = openDelay
 		if openDelay < 0 {

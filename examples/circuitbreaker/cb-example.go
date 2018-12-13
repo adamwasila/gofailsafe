@@ -47,7 +47,7 @@ func successPath(cb *failsafe.CircuitBreaker) {
 }
 
 func main() {
-	cb, _ := failsafe.NewCircuitBreaker(failsafe.WithFailureThreshold(3), failsafe.WithSuccessThreshold(2), failsafe.WithOpenDelay(500*time.Millisecond))
+	cb, _ := failsafe.NewCircuitBreaker(failsafe.FailureThreshold(3), failsafe.SuccessThreshold(2), failsafe.OpenDelay(500*time.Millisecond))
 	fmt.Printf("Circuit Breaker is: %s\n", cb.State())
 	errorPath(cb)
 	errorPath(cb)

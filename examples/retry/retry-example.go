@@ -39,7 +39,7 @@ func main() {
 	r.Run(alwaysWithErrorJob)
 
 	logrus.Info("#2")
-	r, err = f.NewRetry(f.WithDelay(100*time.Millisecond), f.WithRetries(15))
+	r, err = f.NewRetry(f.Delay(100*time.Millisecond), f.Retries(15))
 	r.Run(alwaysWithErrorJob)
 
 	logrus.Info("#3")
@@ -51,10 +51,10 @@ func main() {
 	r.Run(panickingJob)
 
 	logrus.Info("#5")
-	r, err = f.NewRetry(f.WithDelay(-1 * time.Second))
+	r, err = f.NewRetry(f.Delay(-1 * time.Second))
 	logrus.WithField("error", err).Info("Expected non-nil error here")
 
 	logrus.Info("#6")
-	r, err = f.NewRetry(f.WithRetries(-3))
+	r, err = f.NewRetry(f.Retries(-3))
 	logrus.WithField("error", err).Info("Expected non-nil error here")
 }

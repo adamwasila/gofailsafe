@@ -32,7 +32,7 @@ func NewRetry(options ...retryOption) (*Retry, error) {
 	return r, nil
 }
 
-func WithDelay(delay time.Duration) retryOption {
+func Delay(delay time.Duration) retryOption {
 	return func(r *Retry) error {
 		r.delay = delay
 		if delay < 0 {
@@ -42,7 +42,7 @@ func WithDelay(delay time.Duration) retryOption {
 	}
 }
 
-func WithRetries(retries int) retryOption {
+func Retries(retries int) retryOption {
 	return func(r *Retry) error {
 		r.retries = retries
 		if retries < 0 {
