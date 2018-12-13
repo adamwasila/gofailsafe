@@ -80,7 +80,9 @@ func (r *Retry) Run(job func() error) {
 	}
 }
 
-func (r *Retry) Get(job func() (interface{}, error)) {
+	if r.recover {
+		job = recoverWithResultDecorator(job)
+	}
 	i := 1
 	for {
 		if res, err := job(); !r.predicate(res, err) || i >= r.retries {
