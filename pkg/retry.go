@@ -12,6 +12,8 @@ type Retry struct {
 	recover   bool
 }
 
+var ErrOperationFailed = fmt.Errorf("Failed all retried requests")
+
 type retryOption func(*Retry) error
 
 func NewRetry(options ...retryOption) (*Retry, error) {
@@ -66,27 +68,34 @@ func RetryOnPanic() retryOption {
 	}
 }
 
-func (r *Retry) Run(job func() error) {
+func (r *Retry) Run(job func() error) error {
 	if r.recover {
 		job = recoverDecorator(job)
 	}
 	i := 1
 	for {
-		if err := job(); !r.predicate(nil, err) || i >= r.retries {
-			break
+		if err := job(); !r.predicate(nil, err) {
+			return err
+		}
+		if i >= r.retries {
+			return ErrOperationFailed
 		}
 		i++
 		time.Sleep(r.delay)
 	}
 }
 
+func (r *Retry) Get(job func() (interface{}, error)) (interface{}, error) {
 	if r.recover {
 		job = recoverWithResultDecorator(job)
 	}
 	i := 1
 	for {
-		if res, err := job(); !r.predicate(res, err) || i >= r.retries {
-			break
+		if res, err := job(); !r.predicate(res, err) {
+			return res, err
+		}
+		if i >= r.retries {
+			return nil, ErrOperationFailed
 		}
 		i++
 		time.Sleep(r.delay)
