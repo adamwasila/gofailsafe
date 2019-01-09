@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/Sirupsen/logrus"
@@ -11,11 +12,14 @@ import (
 
 func sucessfulJob() error {
 	logrus.Debug("Always succesful Job!")
+	time.Sleep(1 * time.Second)
+	logrus.Debug("Always succesful Job ended!")
 	return nil
 }
 
 func alwaysWithErrorJob() error {
 	logrus.Debug("Ends always with error Job!")
+	time.Sleep(1 * time.Second)
 	return errors.New("Doh!")
 }
 
@@ -32,36 +36,35 @@ func shouldRetry() func(res interface{}, err error) bool {
 	}
 }
 
-var globalCounter = 0
+var globalCounter int64
 
 func errorPath(cb *failsafe.CircuitBreaker) {
-	globalCounter++
-	err := cb.Run(alwaysWithErrorJob)
-	fmt.Printf("%d result %v\n", globalCounter, err)
+	atomic.AddInt64(&globalCounter, 1)
+	cb.Run(alwaysWithErrorJob)
+	// fmt.Printf("%d result %v\n", atomic.LoadInt64(&globalCounter), err)
 }
 
 func successPath(cb *failsafe.CircuitBreaker) {
-	globalCounter++
-	err := cb.Run(sucessfulJob)
-	fmt.Printf("%d result %v\n", globalCounter, err)
+	atomic.AddInt64(&globalCounter, 1)
+	cb.Run(sucessfulJob)
+	// fmt.Printf("%d result %v\n", atomic.LoadInt64(&globalCounter), err)
 }
 
 func main() {
-	cb, _ := failsafe.NewCircuitBreaker(failsafe.FailureThreshold(3), failsafe.SuccessThreshold(2), failsafe.OpenDelay(500*time.Millisecond))
-	fmt.Printf("Circuit Breaker is: %s\n", cb.State())
-	errorPath(cb)
-	errorPath(cb)
-	errorPath(cb)
-	fmt.Printf("Circuit Breaker is: %s\n", cb.State())
-	errorPath(cb)
-	successPath(cb)
-	errorPath(cb)
-	successPath(cb)
-	time.Sleep(1 * time.Second)
-	fmt.Printf("Circuit Breaker is: %s\n", cb.State())
-	successPath(cb)
-	errorPath(cb)
-	fmt.Printf("Circuit Breaker is: %s\n", cb.State())
-	successPath(cb)
-
+	logrus.SetLevel(logrus.InfoLevel)
+	cb, _ := failsafe.NewCircuitBreaker(failsafe.FailureThreshold(3), failsafe.SuccessThreshold(2), failsafe.OpenDelay(3000*time.Millisecond))
+	for i := 0; i < 10; i++ {
+		go successPath(cb)
+	}
+	time.Sleep(100 * time.Millisecond)
+	fmt.Printf("Circuit Breaker: %v\n", cb)
+	time.Sleep(1000 * time.Millisecond)
+	fmt.Printf("Circuit Breaker: %v\n", cb)
+	for i := 0; i < 3; i++ {
+		go errorPath(cb)
+	}
+	time.Sleep(100 * time.Millisecond)
+	fmt.Printf("Circuit Breaker: %v\n", cb)
+	fmt.Printf("Sleeping 3s before exit")
+	time.Sleep(3 * time.Second)
 }

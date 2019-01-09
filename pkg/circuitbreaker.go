@@ -2,40 +2,49 @@ package failsafe
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
+type circuitBreakerConfig struct {
+	failureThreshold    int
+	successThreshold    int
+	openDelay           time.Duration
+	recover             bool
+	halfOpenMaxInflight int64
+}
+
 type CircuitBreaker struct {
-	failureThreshold     int
-	successThreshold     int
-	openDelay            time.Duration
-	recover              bool
-	failuresCount        int
-	successCount         int
-	state                circuitBreakerState
-	stateChangeTimestamp time.Time
+	*circuitBreakerConfig
+	executions CircularBoolArray
+	inflight   int64
+	state      int32
+	ex         chan bool
+	quit       chan struct{}
 }
 
 type circuitBreakerOption func(*CircuitBreaker) error
 
-type circuitBreakerState int
-
 const (
-	stateClosed = circuitBreakerState(iota)
+	stateClosed = iota
 	stateOpen
 	stateHalfOpen
 )
 
 func NewCircuitBreaker(options ...circuitBreakerOption) (*CircuitBreaker, error) {
 	cb := &CircuitBreaker{
-		failureThreshold:     1,
-		successThreshold:     1,
-		openDelay:            1 * time.Minute,
-		recover:              false,
-		failuresCount:        0,
-		successCount:         0,
-		state:                stateClosed,
-		stateChangeTimestamp: time.Now(),
+		circuitBreakerConfig: &circuitBreakerConfig{
+			failureThreshold:    1,
+			successThreshold:    1,
+			openDelay:           1 * time.Minute,
+			recover:             false,
+			halfOpenMaxInflight: 1,
+		},
+		executions: *NewCircularBoolArray(1),
+		inflight:   0,
+		state:      stateClosed,
+		ex:         make(chan bool),
+		quit:       make(chan struct{}),
 	}
 	for _, o := range options {
 		err := o(cb)
@@ -43,11 +52,22 @@ func NewCircuitBreaker(options ...circuitBreakerOption) (*CircuitBreaker, error)
 			return nil, err
 		}
 	}
+	go cb.startMonitor()
 	return cb, nil
 }
 
+func (cb *CircuitBreaker) Close() {
+	close(cb.quit)
+}
+
+func (cb *CircuitBreaker) String() string {
+	inflight := atomic.LoadInt64(&cb.inflight)
+	return fmt.Sprintf("cb{jobs: %v, state: %v, ex: %v}", inflight, cb.State(), cb.executions.Count())
+}
+
 func (cb *CircuitBreaker) State() string {
-	switch cb.state {
+	state := atomic.LoadInt32(&cb.state)
+	switch state {
 	case stateClosed:
 		return "CLOSED"
 	case stateHalfOpen:
@@ -55,26 +75,39 @@ func (cb *CircuitBreaker) State() string {
 	case stateOpen:
 		return "OPEN"
 	default:
-		return "???"
+		panic("must not happen")
 	}
 }
 
 func FailureThreshold(failureThreshold int) circuitBreakerOption {
 	return func(cb *CircuitBreaker) error {
-		cb.failureThreshold = failureThreshold
 		if failureThreshold < 1 {
 			return fmt.Errorf("Failure threshold must be postive (is: %v)", failureThreshold)
 		}
+		cb.failureThreshold = failureThreshold
 		return nil
 	}
 }
 
 func SuccessThreshold(successThreshold int) circuitBreakerOption {
 	return func(cb *CircuitBreaker) error {
-		cb.successThreshold = successThreshold
 		if successThreshold < 1 {
 			return fmt.Errorf("Success threshold must be postive (is: %v)", successThreshold)
 		}
+		cb.successThreshold = successThreshold
+		return nil
+	}
+}
+
+func OverSampleSize(sampleSize int) circuitBreakerOption {
+	return func(cb *CircuitBreaker) error {
+		if sampleSize < cb.failureThreshold {
+			return fmt.Errorf("SampleSize must be >= failureThreshold (is: %v < %v)", sampleSize, cb.failureThreshold)
+		}
+		if sampleSize < cb.successThreshold {
+			return fmt.Errorf("SampleSize must be >= successThreshold (is: %v < %v)", sampleSize, cb.successThreshold)
+		}
+		cb.executions = *NewCircularBoolArray(sampleSize)
 		return nil
 	}
 }
@@ -96,40 +129,33 @@ func OpenOnPanic() circuitBreakerOption {
 	}
 }
 
+func (cb *CircuitBreaker) runJob(job func() error, finishedCallback func(error)) error {
+	if cb.recover {
+		job = recoverDecorator(job)
+	}
+	atomic.AddInt64(&cb.inflight, 1)
+	err := job()
+	atomic.AddInt64(&cb.inflight, -1)
+	finishedCallback(err)
+	return err
+}
+
 func (cb *CircuitBreaker) Run(job func() error) error {
 	if cb.recover {
 		job = recoverDecorator(job)
 	}
-	cb.updateState()
-	switch cb.state {
-	case stateClosed:
-		err := job()
-		if err != nil {
-			cb.failuresCount++
-		} else {
-			cb.failuresCount = 0
-		}
-		if cb.failuresCount >= cb.failureThreshold {
-			cb.failuresCount = 0
-			cb.state = stateOpen
-			cb.stateChangeTimestamp = time.Now()
-		}
-		return err
+	inFlight := atomic.LoadInt64(&cb.inflight)
+	state := atomic.LoadInt32(&cb.state)
+	switch state {
 	case stateHalfOpen:
-		err := job()
-		if err == nil {
-			cb.successCount++
-			if cb.successCount >= cb.successThreshold {
-				cb.successCount = 0
-				cb.state = stateClosed
-				cb.stateChangeTimestamp = time.Now()
-			}
-		} else {
-			cb.successCount = 0
-			cb.state = stateOpen
-			cb.stateChangeTimestamp = time.Now()
+		if inFlight >= cb.halfOpenMaxInflight {
+			return fmt.Errorf("Error: exceeded maximum number of inflight jobs %v > %v", inFlight, cb.halfOpenMaxInflight)
 		}
-		return err
+		fallthrough
+	case stateClosed:
+		return cb.runJob(job, func(err error) {
+			cb.ex <- err == nil
+		})
 	case stateOpen:
 		return fmt.Errorf("Error: circuit breaker is open")
 	default:
@@ -137,9 +163,38 @@ func (cb *CircuitBreaker) Run(job func() error) error {
 	}
 }
 
-func (cb *CircuitBreaker) updateState() {
-	if cb.state == stateOpen && time.Since(cb.stateChangeTimestamp) > cb.openDelay {
-		cb.state = stateHalfOpen
-		cb.stateChangeTimestamp = time.Now()
+func (cb *CircuitBreaker) startMonitor() {
+	for {
+		select {
+		case exStatus := <-cb.ex:
+			cb.executions.Insert(exStatus)
+			switch cb.state {
+			case stateClosed:
+				if cb.executions.CountFalse() >= cb.failureThreshold {
+					fmt.Println("Opening circuit breaker!")
+					cb.executions.Reset(false)
+					atomic.StoreInt32(&cb.state, stateOpen)
+					time.AfterFunc(cb.openDelay, func() {
+						cb.executions.Reset(false)
+						atomic.StoreInt32(&cb.state, stateHalfOpen)
+					})
+				}
+			case stateHalfOpen:
+				cb.executions.Insert(exStatus)
+				if cb.executions.Count() >= cb.successThreshold {
+					fmt.Println("Closing circuit breaker!")
+					cb.executions.Reset(true)
+					atomic.StoreInt32(&cb.state, stateClosed)
+				}
+			case stateOpen:
+				break
+			default:
+				panic("Must never happen")
+			}
+
+		case <-cb.quit:
+			fmt.Printf("Quit monitoring")
+			return
+		}
 	}
 }
